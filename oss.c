@@ -16,31 +16,38 @@
 #include <sys/shm.h>
 #include <sys/stat.h>
 #include <time.h>
+#include "sharedclock.h"
+#include <signal.h>
+#include <sys/ipc.h>
 
+// Prototypes.
+void raiseAlarm();
+int setSeconds(int nanosecs);
 
+// Global Variables.
+SharedClock *clockShare;
+int clockID;
 
 
 int main (int argc, char *argv[])
 {
+  //signal(SIGALRM, raiseAlarm); 
+
   fprintf(stderr, "oss.c begins...\n");
-
-  int option;                    // Holds option values.
-  int maxChildSpawned = 5;       // Option -c; Holds max # of children to be spawned.
-  int timeTillTerminate = 20;    // Option -t; Holds time till master terminates itself and all children.
-  char *log;                     // Option -l; buffer
-  char logReal[25] = {0};        // Option -l; Holds log filename.
-  int logLength = 0;             // Testing purposes
-  int i;
-  
-  int shmPID = 0;
-  unsigned long int secs = 0;
-  unsigned long int nanosecs = 0;
-
-
-  
-
  
-
+  int option;                    // Holds option values.
+  int maxChildSpawned = 0;       // Option -c; Holds max # of children to be spawned.
+  int timeTillTerminate = 0;    // Option -t; Holds time till master terminates itself and all children.
+  int logSize = 25;              // Log file name length, no one would go past 25 right.
+  char *createLogFile = malloc((sizeof(char) * logSize));  // Holds logfile name
+  
+  // Option flags
+  int c_flag = 0; 
+  int t_flag = 0;
+  int l_flag = 0;
+    
+  int i;
+    
   // Getopt Menu loop.
   while ((option = getopt (argc, argv, "hc:t:l:" )) != -1)
   {
@@ -50,40 +57,84 @@ int main (int argc, char *argv[])
         fprintf(stderr, "Usage: ./oss -c # -t # -l str\n");
         fprintf(stderr, "-c decides max child processes to be spawned. Defaults to 5 if not specified.\n");
         fprintf(stderr, "-t decides the time in seconds until the master terminates all children and itself.\n");
-        fprintf(stderr, "-l is the name of the log file being used to document the child processes exiting.\n");
+        fprintf(stderr, "-l is the name of the log file being used to document the child processes exiting. Default: termlog.\n");
 
-        return -1;
+        return 0;
       
-      case 'c' :
+      case 'c' :   // Grab user input for max children to spawn. Option -c
+        if (atoi(optarg) == 0)
+        {
+          perror("OSS: Error: The -c option must be an integer from 1-20: \n");
+          return -1;
+        }
         maxChildSpawned = atoi(optarg);
         if (maxChildSpawned > 20 || maxChildSpawned < 1)
         {
-          fprintf(stderr, "Error: -c option must be from numbers 1-20. \n");
-        }
-        else
-        {
-          break;
+          fprintf(stderr, "Error: The -c option must be an integer from 1-20. \n");
+          return -1;
         }
 
-      case 't' :
-        timeTillTerminate = atoi(optarg);
-        if (timeTillTerminate > 60 || timeTillTerminate < 1)
-        {
-          fprintf(stderr, "Error: -t option must be from numbers 1-60. \n");
-        }
-        else
-        {
-          break;
-        }
-
-      case 'l' :
-        logLength = strlen(optarg);
-        log = malloc(strlen(optarg));
-        strcpy(log, optarg);
-        strncpy(logReal, log, 25);
-        free(log);
+        c_flag = 1; // Set -c option flag to 1.
         break;
   
+
+      case 't' :   // Grab user input for termination time. Option -t
+        if (atoi(optarg) == 0)
+        {
+          perror("OSS: Error: The -t option must be an integer from 1-100. \n");
+          return -1;
+        }
+        timeTillTerminate = atoi(optarg);
+        if (timeTillTerminate > 100 || timeTillTerminate < 1)
+        {
+          fprintf(stderr, "Error: The -t option must be an integer from  1-100. \n");
+          return -1;
+        }
+        
+        t_flag = 1; // Set -t option flag to 1.
+
+      case 'l' :   // Grab user input output log file name. Option -l
+        if ((optarg) == '\0')
+        {
+          perror("OSS: Error: The -l option must have a filename after it. \n");
+          return -1;
+        }
+        
+        strcpy(createLogFile, optarg);
+        l_flag = 1; 
+        break;
+
+      case '?' :  // Catch unknown arguments.
+        if (optopt == 'c')
+        {
+          fprintf(stderr, "Error: The -c option needs an integer from 1-20 after it. \n");
+          return -1;
+        }
+
+        if (optopt == 't')
+        {
+          fprintf(stderr, "Error: The -t option needs an integer from 1-100 after it. \n");
+          return -1;
+        }
+        
+        if (optopt == 'l')
+        {
+          fprintf(stderr, "Error: The -l option needs a filename after it. \n");
+          return -1;
+        }
+
+        else if (isprint (optopt))
+        {
+          fprintf(stderr, "Error:  Unknown option detected. \n");
+          return -1;
+        }
+
+        else
+        {
+          fprintf(stderr, "Error: Unknown error from options detected. \n");
+          return -1;
+        }
+
       default:
         fprintf(stderr, "Default error. \n");
         return -1;
@@ -91,25 +142,87 @@ int main (int argc, char *argv[])
 
   }
 
+  // Set default values.
+
+  if (c_flag == 0)
+  {
+    maxChildSpawned = 5;
+  }
+  
+  if (t_flag == 0)
+  {
+    timeTillTerminate = 20;
+  }
+
+  if (l_flag == 0)
+  {
+    strcpy(createLogFile, "termlog");
+  }
+
+  // Solves a bug I couldn't figure out where -l was taking argument of -c or -t without even -l being specified.
+  if (atoi(createLogFile) == timeTillTerminate || atoi(createLogFile) == maxChildSpawned)
+  {
+    strcpy(createLogFile, "termlog");
+  }
+
+
   fprintf(stderr,"maxChildSpawned: %d \n", maxChildSpawned);
   fprintf(stderr, "timeTillTerminate: %d \n", timeTillTerminate);
-  //fprintf(stderr, "Log filename: %s \n", log);
-  fprintf(stderr, "Log filename length: %d \n", logLength);
-  fprintf(stderr, "Log Real: %s \n", logReal);
+  printf("Log file name: %s \n", createLogFile);
   
   // Allocate shared memory clock
-/*
-  key_t key = ftok("./oss", 'j');
-
-  if ((shmid = shmget(key, 1024, 0600 | IPC_CREAT)) == -1)
+  key_t clockKey = ftok("makefile", (759)); // ftok generates key.
+  if (clockKey == -1) 
   {
-    perror("OSS: Error: shmget");
-    exit(1);
-  }*/
+    perror("OSS: Error: ftok failure");
+    exit(-1);
+  }
+  
+  // Create shared memory ID
+  clockID = shmget(clockKey, sizeof(SharedClock), 0600 | IPC_CREAT);
+  if (clockID == -1)
+  {
+    perror("OSS: Error: shmget failure");
+    exit(-1);
+  }
+  
+  // Attach to shared memory
+  clockShare = (SharedClock*)shmat(clockID, (void *)0, 0);
+  if (clockShare == (void*)-1)
+  {
+    perror("OSS: Error: shmat failure");
+    exit(-1);
+  }
   
 
-
-
+  
+ 
+  // Detach from shared memory.
+  shmdt(clockShare);
+  // Free shared memory.
+  shmctl(clockID, IPC_RMID, NULL);
 
   return 0;
 }
+
+
+
+int setSeconds(int nanosecs)
+{
+  int give = 0;
+  if (nanosecs >= 1000000000)
+  {
+    nanosecs = nanosecs - 1000000000;
+    give = 1 + setSeconds(nanosecs);
+  }
+  return give;
+}
+
+void raiseAlarm()
+{
+  printf("\nTime limit hit, terminating all processes.\n");
+  shmdt(clockShare);
+  shmctl(clockID, IPC_RMID, NULL);
+  kill(0, SIGKILL);
+}
+
