@@ -17,7 +17,8 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "sharedclock.h"
-
+#include <semaphore.h>
+#include <pthread.h>
 
 int randomTime()
 {
@@ -37,10 +38,10 @@ int clockID;
 
 int main (int argc, char *argv[])
 {
-  printf("\nuser.c begins...\n");
+  //printf("\nuser.c begins...\n");
 
   // Allocate shared memory clock
-  key_t clockKey = ftok("makefile", 777);
+  key_t clockKey = ftok("makefile", 123);
   if (clockKey == -1)
   {
     perror("USER: Error: ftok failure");
@@ -62,7 +63,7 @@ int main (int argc, char *argv[])
     perror("USER: Error: shmat failure");
     exit(-1);
   }
-  
+  /*
   // Allocate Message Queue
   struct MessageQueue messageQ;
   int msqID;
@@ -73,7 +74,7 @@ int main (int argc, char *argv[])
     perror("USER: Error: ftok failure msqKey");
     exit(-1);
   }
-
+  */
 
   
 
@@ -152,31 +153,31 @@ int main (int argc, char *argv[])
   shmdt(clockShare); // Detach child from shared memory.
   */
 
-  //message_wait();
-  int termTime = (clockShare->secs * 1000000000) + clockShare->nanosecs;
-  //message_post();
-  termTime = termTime + randomTime();
+  sem_wait(&(clockShare->mutex));
+  int timeToTerm = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Get current time through nanosecs
+  sem_post(&(clockShare->mutex));
+  timeToTerm = timeToTerm + randomTime(); // Create termination time with random num gen
   int guard = 0;
   while (guard == 0)
   {
-    //message_wait();
+    sem_wait(&(clockShare->mutex));
     int tempTime = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Grab current time
-    //message_post();
-    while (tempTime >= termTime)
+    sem_post(&(clockShare->mutex));
+    while (tempTime >= timeToTerm)
     {
-      //message_wait();
-      if (clockShare->shmPID == 0)
+      sem_wait(&(clockShare->mutex));
+      if (clockShare->shmPID == 0)    // Wait until no child processes are in clockShare
       {
-        clockShare->secTerm = clockShare->secs;
-        clockShare->nanoTerm = clockShare->nanosecs;
-        clockShare->shmPID = getpid();
-        //message_post();
-        shmdt(clockShare);
+        //clockShare->secTerm = clockShare->secs;       // reevaluate termination secs
+        //clockShare->nanoTerm = clockShare->nanosecs;  // reevaluate termination nanosecs
+        clockShare->shmPID = getpid(); // Give child pid to clockShare
+        sem_post(&(clockShare->mutex));
+        shmdt(clockShare); 
         return 0;
       }
       else
       {
-        //message_post();
+        sem_post(&(clockShare->mutex));
       }
     }
   }

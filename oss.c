@@ -20,6 +20,8 @@
 #include <signal.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <semaphore.h>
+#include <pthread.h>
 
 // Prototypes.
 void raiseAlarm();
@@ -48,9 +50,9 @@ int main (int argc, char *argv[])
   int logSize = 25;              // Log file name length, no one would go past 25 right.
   char *createLogFile = malloc((sizeof(char) * logSize));  // Holds logfile name.
 
-  struct timespec ts1, ts2;
-  ts1.tv_sec = 0;
-  ts1.tv_nsec = 10000L;
+  struct timespec tim1, tim2;
+  tim1.tv_sec = 0;
+  tim1.tv_nsec = 10000L;
   
   // Option flags
   int c_flag = 0; 
@@ -182,6 +184,7 @@ int main (int argc, char *argv[])
   printf("Log file name: %s \n", createLogFile);
 
   // Allocate message queue --------------------------------------------
+  
   struct MessageQueue messageQ;
   int msqID;
   key_t msqKey = ftok("user.c", 666);
@@ -202,8 +205,10 @@ int main (int argc, char *argv[])
     perror("OSS: Error: msgsnd ");
     exit(-1);
   }
+  
   printf("OSS(0): Message Sent: %s \n", messageQ.messBuff); 
- /* 
+ 
+  /*
   int check = 0;
   while (check == 0)
   {
@@ -220,9 +225,9 @@ int main (int argc, char *argv[])
       strcpy(messageQ.messBuff, "1");
       msgsnd(msqID, &messageQ, 1, 0);
     }
-  }
+  }*/
 
-
+  /*
   int check2 = 0;
   while (check2 == 0)
   {
@@ -242,14 +247,15 @@ int main (int argc, char *argv[])
   */
 
 
+  /*
   if(msgctl(msqID, IPC_RMID, NULL) == -1)
   {
     perror("OSS: Error: msgctl ");
   }
-
+  */
   
   // Allocate shared memory clock --------------------------------------
-  key_t clockKey = ftok("makefile", 777); // ftok generates key.
+  key_t clockKey = ftok("makefile", 123); // ftok generates key.
   if (clockKey == -1) 
   {
     perror("OSS: Error: ftok failure");
@@ -279,9 +285,11 @@ int main (int argc, char *argv[])
   clockShare->shmPID = 0;
 
   // Child process logic
-
+  sem_init(&(clockShare->mutex), 1, 1);
+  alarm(timeTillTerminate);
   pid_t childPid;  // Child pid.
-  alarm(timeTillTerminate); // Set termination alarm
+  
+/*  alarm(timeTillTerminate); // Set termination alarm
 
   childPid = fork();
   if (childPid == 0)
@@ -298,7 +306,7 @@ int main (int argc, char *argv[])
   {
     printf("Begin:\n+[%d](%d)+ -> \n ", childPid, proc_count);
   }
-
+  */
 
   //wait(NULL);
   //kill(0, SIGKILL);
@@ -309,21 +317,26 @@ int main (int argc, char *argv[])
   {
     proc_count++;
     childPid = fork();
-    if (childPid = 0)
+    if (childPid == 0)
     {
       char *args[] = {"./user", NULL};
+      execvp(args[0], args);
     }
     else if (childPid < 0)
     {
       perror("Error: Fork() failed ");
     }
-    else if ((childPid > 0) && (i == 0))
+    else if ((childPid > 0) && (i >= 0))
     {
       printf("Begin:\n +[%d](%d)+ -> \n ", childPid, proc_count);
-    }
-    else if ((childPid > 0) && (i > 0))
-    {
-      printf("+[%d](%d)+ -> \n ", childPid, proc_count);
+      FILE* fptr = (fopen(createLogFile, "a"));
+      if (fptr == NULL)
+      {
+        perror("OSS: Error: fptr error: ");
+      }
+      fprintf(fptr, "OSS(%d)(process #%d): CREATING USER DEFINED INITIAL CHILD #(%d) with child pid: (%d) at my time: \n", getpid(), proc_count, proc_count, childPid);
+      printf("OSS(%d)(process #%d): CREATING USER DEFINED INITIAL CHILD #(%d) with child pid: (%d) at my time : \n", getpid(), proc_count, proc_count, childPid);
+      fclose(fptr);
     }
   }
 
@@ -335,7 +348,7 @@ int main (int argc, char *argv[])
   int guard = 0;
   while (guard == 0)
   {
-    //message_wait(); // wait for critical section
+    sem_wait(&(clockShare->mutex));
     clockShare->nanosecs = (clockShare->nanosecs + (100 * maxChildSpawned)); // begin simulated time with this increment based on a constant
     if (clockShare->nanosecs >= 1000000000)
     {
@@ -343,9 +356,9 @@ int main (int argc, char *argv[])
       clockShare->secs = clockShare->secs + secsTemp;
       clockShare->nanosecs = clockShare->nanosecs % 1000000000; // take away secs from nanosecs
     }
-    //message_post(); // post for critical section
+    sem_post(&(clockShare->mutex));
 
-    //message_wait(); // wait for critical section
+    sem_wait(&(clockShare->mutex));
 
     if(clockShare->shmPID != 0)
     {
@@ -353,14 +366,10 @@ int main (int argc, char *argv[])
       wait(NULL);
 
       FILE* fptr = fopen(createLogFile, "a");
-      if (fptr == NULL)
-      {
-        perror("OSS: Error: Output file error. ");
-      }
 
-      fprintf(fptr, "OSS(%d): Child pid: (%d) is terminating at system clock time: %09lf \n", getpid(), clockShare->shmPID, (((double) clockShare->secs) + ((double) clockShare->nanosecs/1000000000)));
+      fprintf(fptr, "OSS(%d)(process #%d): Child pid: (%d) is terminating at system clock time: %09lf \n", getpid(), proc_count, clockShare->shmPID, (((double) clockShare->secs) + ((double) clockShare->nanosecs/1000000000)));
       
-      printf("OSS(%d): Child pid: (%d) is terminating at system clock time: %091lf \n", getpid(), clockShare->shmPID, (((double) clockShare->secs) + ((double) clockShare->nanosecs/1000000000)));
+      printf("OSS(%d)(process #%d): Child pid: (%d) is terminating at system clock time: %09lf \n", getpid(), proc_count, clockShare->shmPID, (((double) clockShare->secs) + ((double) clockShare->nanosecs/1000000000)));
 
       fclose(fptr);
 
@@ -368,7 +377,7 @@ int main (int argc, char *argv[])
       
       if (clockShare ->secs >= 2) // here we check for the simulated time reaching 2 seconds and then terminate
       {
-        //message_post(); 
+        sem_post(&(clockShare->mutex)); 
         printf("The simulated time has reached 2, terminating all processess.\n");
         FILE* fptr = fopen(createLogFile, "a");
         fprintf(fptr, "The simulated time has reached 2, terminating all processes.\n");
@@ -381,7 +390,7 @@ int main (int argc, char *argv[])
 
       else
       {
-        //message_post();
+        sem_post(&(clockShare->mutex));
       }
 
       int guard2 = 0;
@@ -390,7 +399,7 @@ int main (int argc, char *argv[])
         if (proc_count < 100) // Replaces child if process limit has not been reached
         {
           guard2 = 1; // get out of loop
-          while (nanosleep(&ts1, &ts2));
+          while (nanosleep(&tim1, &tim2));
           childPid = fork();
           if (childPid == 0) // Spawn replacement child
           {
@@ -400,12 +409,16 @@ int main (int argc, char *argv[])
           else if (childPid < 0)
           {
             guard2 = 0; // stay in loop and retry
-            while(nanosleep(&ts1, &ts2));
+            while(nanosleep(&tim1, &tim2));
           }
           else if (childPid > 0)
           {
+
             proc_count++; // increment process counter since a replacement was spawned
-            printf("+[%d](%d)+ -> \n ", childPid, proc_count);
+            FILE* fptr = fopen(createLogFile, "a");
+            fprintf(fptr, "OSS(%d)(process #%d): Creating new replacement child pid: (%d) at my time: \n", getpid(), proc_count, childPid);
+            printf("OSS(%d)(process #%d): Creating new replacement child pid: (%d) at my time: \n", getpid(), proc_count, childPid);
+            fclose(fptr);
           }
         }
         else // Terminate since 100 children have been spawned.
@@ -422,7 +435,7 @@ int main (int argc, char *argv[])
     }
     else
     {
-      //message_post();
+      sem_post(&(clockShare->mutex));
     }
   }
   
