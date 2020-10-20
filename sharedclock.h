@@ -10,9 +10,11 @@
 #define SHAREDCLOCK_H
 
 typedef struct {
-  int sec;     // Holds secs
-  int nano;    // Holds nanosecs
-  int shmPID;  // Holds pid of terminated child process.
+  int secs;        // Holds secs
+  int nanosecs;    // Holds nanosecs
+  int secTerm;     // Holds secs of child to be terminated
+  int nanoTerm;     // Holds nanosecs of child to be terminated
+  int shmPID;      // Holds pid of terminated child process.
 } SharedClock;
 
 #endif
