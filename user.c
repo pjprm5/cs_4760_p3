@@ -63,8 +63,9 @@ int main (int argc, char *argv[])
     perror("USER: Error: shmat failure");
     exit(-1);
   }
-  /*
+  
   // Allocate Message Queue
+  /*
   struct MessageQueue messageQ;
   int msqID;
   key_t msqKey = ftok("user.c", 666);
@@ -75,8 +76,6 @@ int main (int argc, char *argv[])
     exit(-1);
   }
   */
-
-  
 
   // Receive Message and print.
   /*  
@@ -118,10 +117,6 @@ int main (int argc, char *argv[])
     }
   }
   */
-
-
-
-
  /* 
   if (msgrcv(msqID, &messageQ, sizeof(messageQ.messBuff), 1, 0) == -1)
   {
@@ -153,9 +148,11 @@ int main (int argc, char *argv[])
   shmdt(clockShare); // Detach child from shared memory.
   */
 
-  sem_wait(&(clockShare->mutex));
-  int timeToTerm = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Get current time through nanosecs
+  int timeToTerm; 
+  sem_wait(&(clockShare->mutex));   
+  timeToTerm = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Get current time through nanosecs
   sem_post(&(clockShare->mutex));
+  
   timeToTerm = timeToTerm + randomTime(); // Create termination time with random num gen
   int guard = 0;
   while (guard == 0)
@@ -163,13 +160,11 @@ int main (int argc, char *argv[])
     sem_wait(&(clockShare->mutex));
     int tempTime = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Grab current time
     sem_post(&(clockShare->mutex));
-    while (tempTime >= timeToTerm)
+    while (tempTime >= timeToTerm)    // Wait for term
     {
       sem_wait(&(clockShare->mutex));
       if (clockShare->shmPID == 0)    // Wait until no child processes are in clockShare
-      {
-        //clockShare->secTerm = clockShare->secs;       // reevaluate termination secs
-        //clockShare->nanoTerm = clockShare->nanosecs;  // reevaluate termination nanosecs
+      { 
         clockShare->shmPID = getpid(); // Give child pid to clockShare
         sem_post(&(clockShare->mutex));
         shmdt(clockShare); 
@@ -179,7 +174,7 @@ int main (int argc, char *argv[])
       {
         sem_post(&(clockShare->mutex));
       }
-    }
+    }   
   }
   return 0;
 }

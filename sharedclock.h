@@ -13,9 +13,7 @@
 
 typedef struct {
   int secs;        // Holds secs
-  int nanosecs;    // Holds nanosecs
-  //int secTerm;     // Holds secs of child to be terminated
-  //int nanoTerm;    // Holds nanosecs of child to be terminated
+  int nanosecs;    // Holds nanosecs 
   int shmPID;      // Holds pid of terminated child process.
   sem_t mutex;     // crit section sem
 } SharedClock;
