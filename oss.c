@@ -190,12 +190,12 @@ int main (int argc, char *argv[])
     exit(-1);
   }
 
-  messageQ.mtype = 2;
+  messageQ.mtype = 2; // Declare initial mtype as 2 for ./oss
   
-  strcpy(messageQ.messBuff, "1"); // put a msg in buffer
+  strcpy(messageQ.messBuff, "1"); // Put a msg in buffer.
 
   
-  if(msgsnd(msqID, &messageQ, 1, 0) == -1)
+  if(msgsnd(msqID, &messageQ, 1, 0) == -1) // Send the initial msg out.
   {
     perror("OSS: Error: msgsnd ");
     exit(-1);
