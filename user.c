@@ -2,7 +2,7 @@
 // cs_4760
 // Project 3 
 // 10/15/2020
-// User.c
+// user.c
 
 
 #include <stdio.h>
@@ -10,36 +10,33 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <ctype.h>
 #include <getopt.h>
 #include <errno.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#include <sys/msg.h>
+#include <sys/ipc.h>
 #include <time.h>
 #include "sharedclock.h"
-#include <semaphore.h>
-#include <pthread.h>
 
-int randomTime()
+int randomTime() // Grad random number for child process ttl.
 {
-  int randomNum = ((rand() % (1000000 - 1 + 1)) +1);
+  int randomNum = ((rand() % (10000000 - 1 + 1)) +1);
   return randomNum;
 }
 
 // Message queue struct
 struct MessageQueue {
   long mtype;
-  char messBuff[512];
+  char messBuff[1];
 };
-
-
+// Global variables
 SharedClock *clockShare;
 int clockID;
 
 int main (int argc, char *argv[])
 {
-  //printf("\nuser.c begins...\n");
-
+  
   // Allocate shared memory clock
   key_t clockKey = ftok("makefile", 123);
   if (clockKey == -1)
@@ -65,7 +62,7 @@ int main (int argc, char *argv[])
   }
   
   // Allocate Message Queue
-  /*
+  
   struct MessageQueue messageQ;
   int msqID;
   key_t msqKey = ftok("user.c", 666);
@@ -75,106 +72,46 @@ int main (int argc, char *argv[])
     perror("USER: Error: ftok failure msqKey");
     exit(-1);
   }
-  */
+  
+  // Being main loop
+  int readSec = (clockShare->secs);      // Read sec
+  int readNano = (clockShare->nanosecs); // Read nanosecs
+  int secsToEnd = readSec;               // Setup secs to end
+  int nanosecsToEnd = readNano;          // Setup nanosecs to end
+  int addRand = randomTime();            // Get a random time.
 
-  // Receive Message and print.
-  /*  
-  int check = 0;
+  if (readNano + addRand >= 1000000000)  // Check rollovers 
+  {
+    secsToEnd += (readNano + addRand)/1000000000;
+    nanosecsToEnd = (readNano + addRand) % 1000000000;
+  }
+
+
   while (1)
-  {
-    msgrcv(msqID, &messageQ, sizeof(messageQ)+1, 1, IPC_NOWAIT);
-    if (strcmp(messageQ.messBuff, "1") == 0)
+  {   
+    // msgrcv waits to receive only mtype of 2. ./user only receives mtype of 2.
+    if (msgrcv(msqID, &messageQ, sizeof(messageQ.messBuff), 2, 0) == 1)
     {
-      printf("USER(1): In Critical Section -> MSG Received: %s \n", messageQ.messBuff);
-      check = 1;
-    }
-   
-    if(check == 1)
-    {
-      printf("USER(1) Out of Critical Section \n");
-      strcpy(messageQ.messBuff, "1");
-      msgsnd(msqID, &messageQ, 1, 0);
-      break;
-    }
-    
-  }
-  
-  int check2 = 0;
-  while (1)
-  {
-    msgrcv(msqID, &messageQ, sizeof(messageQ)+1, 1, IPC_NOWAIT);
-    if (strcmp(messageQ.messBuff, "1") == 0)
-    {
-      printf("USER(2): In Critical Section -> MSG Received: %s \n", messageQ.messBuff);
-      check2 = 1;
-    }
-    if (check2 == 1)
-    {
-      printf("USER(2): Out of Critical Section\n");
-      strcpy(messageQ.messBuff, "1");
-      msgsnd(msqID, &messageQ, 1, 0);
-      break;
-    }
-  }
-  */
- /* 
-  if (msgrcv(msqID, &messageQ, sizeof(messageQ.messBuff), 1, 0) == -1)
-  {
-    perror("USER: Error: msgrcv failure ");
-    exit(-1);
-  }
-  
-  //printf("TESTING...\n");
-  printf("USER: Message Received: %s \n", messageQ.messBuff);
-  
-
-  // Change Message and Send
-  
-  strcpy(messageQ.messBuff, "7");
-  int len = strlen(messageQ.messBuff);
-  if(msgsnd(msqID, &messageQ, len+1, 0) == -1)
-  {
-    perror("USER: Error: msgsnd ");
-    exit(-1);
-  }
-  printf("USER: Message Sent: %s \n", messageQ.messBuff);
-  
-
-  int currentTime = (clockShare->secs * 1000000000) + clockShare->nanosecs;
-
-  printf("\nCurrent time: %d \n", currentTime);
-  printf("Seconds: %d \n", clockShare->secs);
-  printf("Nanoseconds: %d \n", clockShare->nanosecs);
-  shmdt(clockShare); // Detach child from shared memory.
-  */
-
-  int timeToTerm; 
-  sem_wait(&(clockShare->mutex));   
-  timeToTerm = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Get current time through nanosecs
-  sem_post(&(clockShare->mutex));
-  
-  timeToTerm = timeToTerm + randomTime(); // Create termination time with random num gen
-  int guard = 0;
-  while (guard == 0)
-  {
-    sem_wait(&(clockShare->mutex));
-    int tempTime = (clockShare->secs * 1000000000) + clockShare->nanosecs; // Grab current time
-    sem_post(&(clockShare->mutex));
-    while (tempTime >= timeToTerm)    // Wait for term
-    {
-      sem_wait(&(clockShare->mutex));
-      if (clockShare->shmPID == 0)    // Wait until no child processes are in clockShare
-      { 
-        clockShare->shmPID = getpid(); // Give child pid to clockShare
-        sem_post(&(clockShare->mutex));
-        shmdt(clockShare); 
-        return 0;
-      }
-      else
+      if (clockShare->shmPID == 0 && clockShare->secs >= secsToEnd)  
       {
-        sem_post(&(clockShare->mutex));
+        if (clockShare->nanosecs >= nanosecsToEnd)
+        {
+          clockShare->secsKill = clockShare->secs;           // Grab term time for secs
+          clockShare->nanosecsKill = clockShare->nanosecs;   // Grab term time for nanosecs
+          clockShare->shmPID = getpid();                     // Give child pid to clockShare
+          //printf("USER: In CS: %d \n", clockShare->shmPID);
+          messageQ.mtype = 1;
+          msgsnd(msqID, &messageQ, sizeof(messageQ.messBuff), 0);
+          // msgsnd sends out with a mtype of 1. ./user only ever sends out with mtype of 1.
+          shmdt(clockShare);
+          return 0;    
+        }
       }
-    }   
+    }
+    messageQ.mtype = 1;
+    msgsnd(msqID, &messageQ, sizeof(messageQ.messBuff), 0); 
+    // msgsnd sends out with a mtype of 1. ./user only ever sends out with mtype of 1.
+      
   }
   return 0;
 }
