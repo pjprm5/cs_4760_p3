@@ -36,7 +36,7 @@ int clockID;
 
 int main (int argc, char *argv[])
 {
-  
+    
   // Allocate shared memory clock
   key_t clockKey = ftok("makefile", 123);
   if (clockKey == -1)
